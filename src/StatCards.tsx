@@ -4,6 +4,7 @@ import {
   avgEngagement,
   bestDayOfWeek,
   engagementRate,
+  mediaComparison,
   pctChange,
   postsInPeriod,
   postsPerWeek,
@@ -23,6 +24,7 @@ interface Card {
   value: string;
   delta?: number | null; // percent change vs previous period; undefined = card has no delta
   note?: string;
+  wide?: boolean; // spans the full row
 }
 
 export default function StatCards({ snapshot, filter, days }: Props) {
@@ -100,12 +102,13 @@ export default function StatCards({ snapshot, filter, days }: Props) {
       delta: covered.length ? pctChange(curCov.length, prevCov.length) : null,
       note: deltaNote,
     },
+    mediaCard(current, platforms),
   ];
 
   return (
     <section className="stat-grid" aria-label="Key stats">
       {cards.map((c) => (
-        <div key={c.label} className="card stat">
+        <div key={c.label} className={`card stat${c.wide ? ' stat-wide' : ''}`}>
           <div className="stat-label">{c.label}</div>
           <div className="stat-value">{c.value}</div>
           {c.delta !== undefined && <Delta value={c.delta} />}
@@ -114,6 +117,37 @@ export default function StatCards({ snapshot, filter, days }: Props) {
       ))}
     </section>
   );
+}
+
+/** Posts with an image or video vs posts without, by typical (median) engagement. */
+function mediaCard(current: Post[], platforms: Platform[]): Card {
+  const label = 'Posts with images or video vs without';
+  const cmp = mediaComparison(current);
+  const alwaysMedia = platforms.filter((pl) => !cmp?.platforms.includes(pl)).map((pl) => PLATFORM_LABEL[pl]);
+  if (!cmp) {
+    return {
+      label,
+      value: '—',
+      wide: true,
+      note:
+        current.length > 0 && current.every((p) => p.media !== null)
+          ? 'Every post in this period has an image or video, so there’s nothing to compare.'
+          : `Not enough posts of both kinds in this period to compare (needs 3+ of each; ${current.filter((p) => p.media === null).length} without media).`,
+    };
+  }
+  const { withMedia, without, ratio } = cmp;
+  const verdict = ratio >= 1 ? 'more' : 'less';
+  return {
+    label,
+    value: `${ratio.toFixed(1)}× ${verdict} engagement`,
+    wide: true,
+    note:
+      `Typical post with an image or video: ${fmtNumber(Math.round(withMedia.typical))} engagement (${withMedia.count} posts). ` +
+      `Without: ${fmtNumber(Math.round(without.typical))} (${without.count} posts).` +
+      (cmp.platforms.length && alwaysMedia.length
+        ? ` Compares ${cmp.platforms.map((pl) => PLATFORM_LABEL[pl]).join(' and ')} only; ${alwaysMedia.join(', ')} posts always include media.`
+        : ''),
+  };
 }
 
 function Delta({ value }: { value: number | null }) {

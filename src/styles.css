@@ -87,6 +87,7 @@ main { display: grid; gap: var(--gap); }
 /* Stat cards */
 .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
 .stat { display: grid; gap: 4px; align-content: start; padding: 14px; }
+.stat-wide { grid-column: 1 / -1; }
 .stat-label { font-size: 0.8125rem; color: var(--text-muted); }
 .stat-value { font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .stat-delta { font-size: 0.875rem; font-variant-numeric: tabular-nums; }
@@ -185,3 +186,13 @@ main { display: grid; gap: var(--gap); }
 @media (max-width: 520px) {
   h1 { font-size: 1.75rem; }
 }
+
+/* Day panel (opened by clicking a chart point) */
+.day-panel { display: grid; gap: 10px; border-top: 1px solid var(--border); padding-top: 12px; animation: fade-in 150ms ease-out; }
+.day-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.day-panel-head h3 { font-size: 0.9375rem; font-weight: 600; }
+.day-panel-head .muted { font-weight: 400; }
+@media (prefers-reduced-motion: reduce) { .day-panel { animation: none; } }
+
+/* Recharts focuses an inner layer on mouse clicks; only show focus rings for keyboard focus. */
+.chart-panel :focus:not(:focus-visible) { outline: none; }

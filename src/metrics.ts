@@ -132,3 +132,47 @@ export function dailySeries(posts: Post[], end: Date, days: number): DayPoint[] 
   }
   return points;
 }
+
+// ---------------------------------------------------------------------------
+// Posts with media (image or video attached) vs without
+// ---------------------------------------------------------------------------
+const MIN_PER_GROUP = 3;
+
+function median(values: number[]): number {
+  const s = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+export interface MediaComparison {
+  withMedia: { typical: number; count: number };
+  without: { typical: number; count: number };
+  ratio: number; // typical with / typical without
+  platforms: Platform[]; // platforms that had both kinds of post
+}
+
+/**
+ * Compares typical (median) engagement of posts with an attached image or video against
+ * posts without one. Only platforms that have at least MIN_PER_GROUP of each kind count,
+ * since Instagram, TikTok and YouTube posts always carry media.
+ */
+export function mediaComparison(posts: Post[]): MediaComparison | null {
+  const scored = posts.filter((p) => engagement(p) !== null);
+  const platforms = [...new Set(scored.map((p) => p.platform))].filter((pl) => {
+    const own = scored.filter((p) => p.platform === pl);
+    const withCount = own.filter((p) => p.media !== null).length;
+    return withCount >= MIN_PER_GROUP && own.length - withCount >= MIN_PER_GROUP;
+  });
+  if (platforms.length === 0) return null;
+  const pool = scored.filter((p) => platforms.includes(p.platform));
+  const withMedia = pool.filter((p) => p.media !== null).map((p) => engagement(p)!);
+  const without = pool.filter((p) => p.media === null).map((p) => engagement(p)!);
+  const typicalWithout = median(without);
+  if (typicalWithout === 0) return null;
+  return {
+    withMedia: { typical: median(withMedia), count: withMedia.length },
+    without: { typical: typicalWithout, count: without.length },
+    ratio: median(withMedia) / typicalWithout,
+    platforms,
+  };
+}
