@@ -1,6 +1,7 @@
-import { RANGES, type Filter, type RangeDays } from './App';
+import type { ReactNode } from 'react';
+import { RANGES, type RangeDays } from './App';
 import { fmtDate, fmtDateTime, greeting, PLATFORM_LABEL, platformColor, rangeLabel } from './format';
-import { PLATFORMS, type Snapshot } from './types';
+import { ALL, sameFilter, type Filter, type Platform, type Snapshot } from './types';
 
 interface Props {
   snapshot: Snapshot;
@@ -11,15 +12,19 @@ interface Props {
 }
 
 export default function Header({ snapshot, filter, onFilter, days, onDays }: Props) {
-  const handle = snapshot.accounts.find((a) => a.platform === 'youtube')?.handle;
+  // A plain function (not a component) so the buttons keep their identity, and focus, across renders.
+  const chip = (key: string, f: Filter, children: ReactNode, className = 'chip') => (
+    <button key={key} type="button" className={className} aria-pressed={sameFilter(filter, f)} onClick={() => onFilter(f)}>
+      {children}
+    </button>
+  );
+
   return (
     <header className="header">
       <div>
         <h1>{greeting(new Date())}, James</h1>
         <p className="subtitle">Let's see how your social media posts are performing.</p>
-        <p className="muted">
-          {handle ? `@${handle} · ` : ''}Snapshot generated {fmtDateTime(snapshot.generatedAt)}
-        </p>
+        <p className="muted">Snapshot generated {fmtDateTime(snapshot.generatedAt)}</p>
       </div>
 
       <div className="segmented" role="group" aria-label="Time range">
@@ -30,27 +35,56 @@ export default function Header({ snapshot, filter, onFilter, days, onDays }: Pro
         ))}
       </div>
 
-      <div className="chips" role="group" aria-label="Filter by platform">
-        {(['all', ...PLATFORMS] as Filter[]).map((f) => (
-          <button key={f} type="button" className="chip" aria-pressed={filter === f} onClick={() => onFilter(f)}>
-            {f !== 'all' && <span className="dot" style={{ background: platformColor(f) }} aria-hidden />}
-            {f === 'all' ? 'All' : PLATFORM_LABEL[f]}
-          </button>
-        ))}
-      </div>
-
-      <ul className="scraped">
-        {PLATFORMS.map((p) => {
-          const s = snapshot.sources[p];
+      {/* Account filter: everything, a whole group, or one account (group + platform). */}
+      <div className="account-filter" role="group" aria-label="Filter by account">
+        {chip('all', ALL, 'All accounts')}
+        {snapshot.groups.map((g) => {
+          const accounts = snapshot.accounts.filter((a) => a.group === g.id);
           return (
-            <li key={p}>
-              <span className="dot" style={{ background: platformColor(p) }} aria-hidden />
-              {PLATFORM_LABEL[p]}:{' '}
-              {s.status === 'ok' ? `scraped ${fmtDate(s.scrapedAt)}` : <span className="warn">{s.status}</span>}
-            </li>
+            <div key={g.id} className="account-group" role="group" aria-label={g.name}>
+              {chip(g.id, { group: g.id, platform: 'all' }, g.name, 'chip chip-group')}
+              {accounts.map((a) =>
+                chip(
+                  a.id,
+                  { group: g.id, platform: a.platform },
+                  <>
+                    <span className="dot" style={{ background: platformColor(a.platform) }} aria-hidden />
+                    <span className="visually-hidden">{g.shortName} </span>
+                    {PLATFORM_LABEL[a.platform]}
+                  </>,
+                ),
+              )}
+            </div>
           );
         })}
-      </ul>
+      </div>
+
+      <ScrapeDates snapshot={snapshot} />
     </header>
+  );
+}
+
+/** "Last scraped" per group: one date when all its accounts match, otherwise each account. */
+function ScrapeDates({ snapshot }: { snapshot: Snapshot }) {
+  return (
+    <ul className="scraped">
+      {snapshot.groups.map((g) => {
+        const accounts = snapshot.accounts.filter((a) => a.group === g.id);
+        const configured = Object.entries(snapshot.sources).filter(([id]) => id.startsWith(`${g.id}-`));
+        const failed = configured
+          .filter(([, s]) => s.status !== 'ok')
+          .map(([id]) => PLATFORM_LABEL[id.slice(g.id.length + 1) as Platform] ?? id);
+        const dates = [...new Set(accounts.map((a) => fmtDate(snapshot.sources[a.id]?.scrapedAt ?? null)))];
+        return (
+          <li key={g.id}>
+            <strong>{g.shortName}</strong>{' '}
+            {dates.length === 1
+              ? `scraped ${dates[0]}`
+              : accounts.map((a) => `${PLATFORM_LABEL[a.platform]} ${fmtDate(snapshot.sources[a.id]?.scrapedAt ?? null)}`).join(' · ')}
+            {failed.length > 0 && <span className="warn"> · failed: {failed.join(', ')}</span>}
+          </li>
+        );
+      })}
+    </ul>
   );
 }

@@ -1,9 +1,9 @@
-import type { Filter, RangeDays } from './App';
-import { PLATFORM_LABEL, platformColor, rangeLabel } from './format';
+import type { RangeDays } from './App';
+import { accountLabel, filterLabel, platformColor, rangeLabel } from './format';
 import { snapshotInsights } from './insights';
 import { engagement, postsInPeriod } from './metrics';
 import { PostCard, topPosts } from './TopPosts';
-import type { Snapshot } from './types';
+import { filterAccountId, inFilter, type Filter, type Snapshot } from './types';
 
 interface Props {
   snapshot: Snapshot;
@@ -12,32 +12,32 @@ interface Props {
 }
 
 /**
- * The single best post for the current view, plus the lead insight for its platform.
- * "All" ranks every platform's posts by engagement; a single platform uses its own
+ * The single best post for the current view, plus the lead insight for its account.
+ * Across several accounts, posts are ranked by engagement; a single account uses its own
  * ranking (views for YouTube and TikTok), the same as the Top posts carousel.
  */
 export default function Spotlight({ snapshot, filter, days }: Props) {
   const inRange = postsInPeriod(snapshot.posts, new Date(snapshot.generatedAt), days).filter(
-    (p) => snapshot.sources[p.platform].status === 'ok',
+    (p) => snapshot.sources[p.accountId]?.status === 'ok' && inFilter(filter, p),
   );
-  const post =
-    filter === 'all'
-      ? [...inRange].sort((a, b) => (engagement(b) ?? -1) - (engagement(a) ?? -1))[0]
-      : topPosts(inRange, filter, 1)[0];
-  const platform = post?.platform ?? (filter === 'all' ? null : filter);
-  const insight = platform ? snapshotInsights(snapshot, platform)[0] : undefined;
+  const single = filterAccountId(filter);
+  const singleAccount = single ? snapshot.accounts.find((a) => a.id === single) : undefined;
+  const post = singleAccount
+    ? topPosts(inRange, singleAccount.id, singleAccount.platform, 1)[0]
+    : [...inRange].sort((a, b) => (engagement(b) ?? -1) - (engagement(a) ?? -1))[0];
+  const insight = post ? snapshotInsights(snapshot, post.accountId)[0] : undefined;
 
   return (
     <aside className="spotlight" aria-labelledby="spot-title">
       <div className="section-head">
         <h2 id="spot-title">Spotlight</h2>
         <p className="muted">
-          {filter === 'all' ? 'Best post across all accounts' : `Best ${PLATFORM_LABEL[filter]} post`}, {rangeLabel(days)}.
+          Best post · {filterLabel(snapshot, filter)}, {rangeLabel(days)}.
         </p>
       </div>
       {post ? (
         <div className="spotlight-post">
-          <PostCard post={post} rank={1} showPlatform />
+          <PostCard post={post} rank={1} label={accountLabel(snapshot, post.accountId)} />
         </div>
       ) : (
         <div className="card empty">No posts in this period.</div>
@@ -46,7 +46,7 @@ export default function Spotlight({ snapshot, filter, days }: Props) {
         <article className="card insight insight-feature">
           <div className="insight-label">
             <span className="dot" style={{ background: platformColor(insight.platform) }} aria-hidden />
-            Top insight · {PLATFORM_LABEL[insight.platform]} · {insight.title}
+            Top insight · {accountLabel(snapshot, insight.accountId)} · {insight.title}
           </div>
           <p>{insight.text}</p>
         </article>

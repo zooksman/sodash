@@ -17,7 +17,9 @@ export interface PostMedia {
 }
 
 export interface Post {
-  id: string;
+  id: string; // unique per account: collab posts can appear on two accounts
+  accountId: string; // "<group>-<platform>", e.g. "omg-x"
+  group: string;
   platform: Platform;
   url: string;
   text: string;
@@ -29,7 +31,17 @@ export interface Post {
   media: PostMedia | null;
 }
 
+/** A person or brand that owns accounts on several platforms. */
+export interface AccountGroup {
+  id: string;
+  name: string; // "O'Keefe Media Group"
+  shortName: string; // "OMG", used where space is tight
+}
+
+/** One account on one platform. */
 export interface AccountSummary {
+  id: string; // "<group>-<platform>"
+  group: string;
   platform: Platform;
   handle: string;
   followers: number | null;
@@ -52,8 +64,27 @@ export interface SourceInfo {
 
 export interface Snapshot {
   generatedAt: string;
+  groups: AccountGroup[];
   accounts: AccountSummary[];
   posts: Post[];
   episodes: PodcastEpisode[];
-  sources: Record<Platform, SourceInfo>;
+  sources: Record<string, SourceInfo>; // keyed by account id
 }
+
+/** What the page is showing: everything, one account group, or one account (group + platform). */
+export interface Filter {
+  group: string | 'all';
+  platform: Platform | 'all';
+}
+
+export const ALL: Filter = { group: 'all', platform: 'all' };
+
+/** True if a post or account falls inside the filter. */
+export const inFilter = (f: Filter, item: { group: string; platform: Platform }) =>
+  (f.group === 'all' || item.group === f.group) && (f.platform === 'all' || item.platform === f.platform);
+
+/** The single account a filter selects, if it selects exactly one. */
+export const filterAccountId = (f: Filter): string | null =>
+  f.group !== 'all' && f.platform !== 'all' ? `${f.group}-${f.platform}` : null;
+
+export const sameFilter = (a: Filter, b: Filter) => a.group === b.group && a.platform === b.platform;

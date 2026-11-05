@@ -1,4 +1,4 @@
-import type { Platform } from './types';
+import type { Filter, Platform, Snapshot } from './types';
 
 export const PLATFORM_LABEL: Record<Platform, string> = {
   x: 'X',
@@ -39,4 +39,19 @@ export function rangeLabel(days: number): string {
 export function greeting(date: Date): string {
   const h = date.getHours();
   return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
+
+/** "OMG · X": short group name plus platform, for tabs, cards and notes. */
+export function accountLabel(snapshot: Snapshot, accountId: string): string {
+  const account = snapshot.accounts.find((a) => a.id === accountId);
+  if (!account) return accountId;
+  const group = snapshot.groups.find((g) => g.id === account.group);
+  return `${group?.shortName ?? account.group} · ${PLATFORM_LABEL[account.platform]}`;
+}
+
+/** Heading text for the current filter: "All accounts", a group's name, or "James O'Keefe · X". */
+export function filterLabel(snapshot: Snapshot, f: Filter): string {
+  if (f.group === 'all') return 'All accounts';
+  const name = snapshot.groups.find((g) => g.id === f.group)?.name ?? f.group;
+  return f.platform === 'all' ? name : `${name} · ${PLATFORM_LABEL[f.platform]}`;
 }

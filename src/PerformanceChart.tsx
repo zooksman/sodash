@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import type { Filter, RangeDays } from './App';
-import { fmtNumber, PLATFORM_LABEL, rangeLabel } from './format';
+import type { RangeDays } from './App';
+import { accountLabel, filterLabel, fmtNumber, rangeLabel } from './format';
 import { dailySeries, engagement, type DayPoint } from './metrics';
 import { PostCard } from './TopPosts';
-import type { Post, Snapshot } from './types';
+import { filterAccountId, inFilter, type Filter, type Post, type Snapshot } from './types';
 
 interface Props {
   snapshot: Snapshot;
@@ -49,18 +49,20 @@ export default function PerformanceChart({ snapshot, filter, days }: Props) {
   const dayPanelRef = useRef<HTMLDivElement>(null);
 
   // A different view means a different set of days.
-  useEffect(() => setSelected(null), [filter, days]);
+  useEffect(() => setSelected(null), [filter.group, filter.platform, days]);
   useEffect(() => {
     if (selected) dayPanelRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [selected]);
 
   const posts = snapshot.posts.filter(
-    (p) => snapshot.sources[p.platform].status === 'ok' && (filter === 'all' || p.platform === filter),
+    (p) => snapshot.sources[p.accountId]?.status === 'ok' && inFilter(filter, p),
   );
   const data = dailySeries(posts, new Date(snapshot.generatedAt), days);
-  const color = cssVar(filter === 'all' ? '--text' : `--c-${filter}`);
+  // One account: its platform's accent. Several accounts: neutral ink.
+  const single = filterAccountId(filter);
+  const color = cssVar(single ? `--c-${filter.platform}` : '--text');
   const panels = PANELS.filter((panel) => data.some((d) => d[panel.key] !== null && d[panel.key] !== 0));
-  const title = filter === 'all' ? 'All accounts' : PLATFORM_LABEL[filter];
+  const title = filterLabel(snapshot, filter);
 
   const open = (date: string | null | undefined, metric: MetricKey) => {
     const point = data.find((d) => d.date === date);
@@ -180,7 +182,7 @@ export default function PerformanceChart({ snapshot, filter, days }: Props) {
           </div>
           <div className="strip">
             {dayPosts.map((post, i) => (
-              <PostCard key={post.id} post={post} rank={i + 1} showPlatform={filter === 'all'} />
+              <PostCard key={post.id} post={post} rank={i + 1} label={single ? undefined : accountLabel(snapshot, post.accountId)} />
             ))}
           </div>
         </div>

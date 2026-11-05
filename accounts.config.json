@@ -1,0 +1,27 @@
+{
+  "groups": [
+    {
+      "id": "omg",
+      "name": "O'Keefe Media Group",
+      "shortName": "OMG",
+      "accounts": {
+        "x": "https://x.com/OKeefeMedia",
+        "facebook": "https://www.facebook.com/OkeefeMediaGroup/",
+        "instagram": "https://www.instagram.com/okeefemedia/",
+        "tiktok": "https://www.tiktok.com/@okeefemediagroup",
+        "youtube": "https://www.youtube.com/@okeefemedia"
+      }
+    },
+    {
+      "id": "jok",
+      "name": "James O'Keefe",
+      "shortName": "James",
+      "accounts": {
+        "x": "https://x.com/JamesOKeefeIII",
+        "facebook": "https://www.facebook.com/JamesOKeefeAuthor/",
+        "instagram": "https://www.instagram.com/jamesokeefeiii/",
+        "tiktok": "https://www.tiktok.com/@jamesokeefeiii"
+      }
+    }
+  ]
+}

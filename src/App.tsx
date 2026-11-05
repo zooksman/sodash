@@ -1,31 +1,37 @@
 import { useEffect, useState } from 'react';
 import Header from './Header';
-import PerformanceChart from './PerformanceChart';
-import StatCards from './StatCards';
 import Highlights from './Highlights';
+import PerformanceChart from './PerformanceChart';
 import Spotlight from './Spotlight';
+import StatCards from './StatCards';
 import TopPosts from './TopPosts';
-import { PLATFORMS } from './types';
-import { PLATFORM_LABEL } from './format';
-import type { Platform, Snapshot } from './types';
+import { filterLabel } from './format';
+import { ALL, filterAccountId, type Filter, type Snapshot } from './types';
 
-export type Filter = Platform | 'all';
-
-export const RANGES = [30, 14, 7, 3, 1] as const;
+export const RANGES = [90, 30, 14, 7, 3, 1] as const;
 export type RangeDays = (typeof RANGES)[number];
 
 type LoadState = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; snapshot: Snapshot };
 
 export default function App() {
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
-  const [filter, setFilter] = useState<Filter>('all');
+  const [filter, setFilter] = useState<Filter>(ALL);
   const [days, setDays] = useState<RangeDays>(30);
-  // Platform shown in Top posts and Highlights; follows the filter when one is picked.
-  const [focusPlatform, setFocusPlatform] = useState<Platform>('x');
+  // Account shown in Top posts and Highlights. It follows the filter: a single account
+  // selects it; a group keeps the current one if it's in that group, else its first account.
+  const [focusAccount, setFocusAccount] = useState<string>('');
 
+  const snapshot = state.kind === 'ready' ? state.snapshot : null;
   useEffect(() => {
-    if (filter !== 'all') setFocusPlatform(filter);
-  }, [filter]);
+    if (!snapshot) return;
+    const ok = snapshot.accounts.filter((a) => snapshot.sources[a.id]?.status === 'ok');
+    const single = filterAccountId(filter);
+    if (single) return setFocusAccount(single);
+    setFocusAccount((current) => {
+      const inGroup = ok.filter((a) => filter.group === 'all' || a.group === filter.group);
+      return inGroup.some((a) => a.id === current) ? current : (inGroup[0]?.id ?? '');
+    });
+  }, [snapshot, filter]);
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}data/snapshot.json`)
@@ -33,26 +39,23 @@ export default function App() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<Snapshot>;
       })
-      .then((snapshot) => {
-        setState({ kind: 'ready', snapshot });
-        const first = PLATFORMS.find((p) => snapshot.sources[p].status === 'ok');
-        if (first) setFocusPlatform(first);
-      })
+      .then((data) => setState({ kind: 'ready', snapshot: data }))
       .catch((err) => setState({ kind: 'error', message: String(err.message ?? err) }));
   }, []);
 
   if (state.kind === 'loading') return <p className="status-msg">Loading snapshot…</p>;
-  if (state.kind === 'error') {
+  if (state.kind === 'error' || !snapshot) {
     return (
       <p className="status-msg" role="alert">
-        Could not load data/snapshot.json ({state.message}). Run <code>npm run refresh</code> to generate it.
+        Could not load data/snapshot.json ({state.kind === 'error' ? state.message : 'no data'}). Run{' '}
+        <code>npm run refresh</code> to generate it.
       </p>
     );
   }
 
-  const { snapshot } = state;
-  const source = filter === 'all' ? null : snapshot.sources[filter];
-  const unavailable = source !== null && source.status !== 'ok';
+  const single = filterAccountId(filter);
+  const source = single ? snapshot.sources[single] : null;
+  const unavailable = single !== null && source?.status !== 'ok';
 
   return (
     <div className="page">
@@ -60,8 +63,8 @@ export default function App() {
       <main>
         {unavailable ? (
           <section className="card empty">
-            No {PLATFORM_LABEL[filter as Platform]} data:{' '}
-            {source.status === 'missing' ? 'no account URL is configured.' : 'the last scrape failed.'}
+            No {filterLabel(snapshot, filter)} data:{' '}
+            {source ? 'the last scrape failed.' : 'this account isn’t configured.'}
           </section>
         ) : (
           <>
@@ -74,10 +77,12 @@ export default function App() {
               <Spotlight snapshot={snapshot} filter={filter} days={days} />
             </div>
             {/* Top posts takes two of three columns; Highlights fills the third. */}
-            <div className="split">
-              <TopPosts snapshot={snapshot} days={days} platform={focusPlatform} onPlatform={setFocusPlatform} />
-              <Highlights snapshot={snapshot} platform={focusPlatform} />
-            </div>
+            {focusAccount && (
+              <div className="split">
+                <TopPosts snapshot={snapshot} days={days} filter={filter} accountId={focusAccount} onAccount={setFocusAccount} />
+                <Highlights snapshot={snapshot} accountId={focusAccount} />
+              </div>
+            )}
           </>
         )}
       </main>

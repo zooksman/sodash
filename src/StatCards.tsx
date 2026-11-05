@@ -1,5 +1,5 @@
-import type { Filter, RangeDays } from './App';
-import { fmtNumber, fmtPct, PLATFORM_LABEL, rangeLabel } from './format';
+import type { RangeDays } from './App';
+import { accountLabel, fmtNumber, fmtPct, PLATFORM_LABEL, rangeLabel } from './format';
 import {
   avgEngagement,
   bestDayOfWeek,
@@ -9,7 +9,7 @@ import {
   postsInPeriod,
   postsPerWeek,
 } from './metrics';
-import type { Platform, Post, Snapshot } from './types';
+import { filterAccountId, inFilter, type Filter, type Platform, type Post, type Snapshot } from './types';
 
 const DAY_MS = 86_400_000;
 
@@ -29,25 +29,29 @@ interface Card {
 
 export default function StatCards({ snapshot, filter, days }: Props) {
   const end = new Date(snapshot.generatedAt);
-  const inScope = (p: { platform: Platform }) =>
-    snapshot.sources[p.platform].status === 'ok' && (filter === 'all' || p.platform === filter);
+  const inScope = (item: { group: string; platform: Platform; accountId?: string; id?: string }) =>
+    snapshot.sources[item.accountId ?? item.id ?? '']?.status === 'ok' && inFilter(filter, item);
   const posts = snapshot.posts.filter(inScope);
   const accounts = snapshot.accounts.filter(inScope);
 
   const current = postsInPeriod(posts, end, days, 0);
 
-  // Deltas only compare platforms whose scraped history covers at least 90% of the previous
-  // period; otherwise a platform with a short history would look like a sudden jump.
+  // Deltas only compare accounts whose scraped history covers at least 90% of the previous
+  // period; otherwise an account with a short history would look like a sudden jump.
   const prevStart = end.getTime() - 2 * days * DAY_MS + 0.1 * days * DAY_MS;
-  const platforms = [...new Set(accounts.map((a) => a.platform))];
-  const covered = platforms.filter((pl) =>
-    posts.some((p) => p.platform === pl && Date.parse(p.publishedAt) <= prevStart),
+  const accountIds = accounts.map((a) => a.id);
+  const covered = accountIds.filter((id) =>
+    posts.some((p) => p.accountId === id && Date.parse(p.publishedAt) <= prevStart),
   );
-  const excluded = platforms.filter((pl) => !covered.includes(pl));
-  const onlyCovered = (list: Post[]) => list.filter((p) => covered.includes(p.platform));
+  const excluded = accountIds.filter((id) => !covered.includes(id));
+  const onlyCovered = (list: Post[]) => list.filter((p) => covered.includes(p.accountId));
   const curCov = onlyCovered(current);
   const prevCov = onlyCovered(postsInPeriod(posts, end, days, 1));
-  const covAccounts = accounts.filter((a) => covered.includes(a.platform));
+  const covAccounts = accounts.filter((a) => covered.includes(a.id));
+  // Within one group, the platform name is enough; across groups, say whose account it is.
+  const oneGroup = new Set(accounts.map((a) => a.group)).size <= 1;
+  const nameOf = (id: string) =>
+    oneGroup ? PLATFORM_LABEL[accounts.find((a) => a.id === id)!.platform] : accountLabel(snapshot, id);
 
   const rateNow = engagementRate(current, accounts);
   const rateCov = engagementRate(curCov, covAccounts);
@@ -56,9 +60,9 @@ export default function StatCards({ snapshot, filter, days }: Props) {
   const best = bestDayOfWeek(current);
 
   const deltaNote = covered.length === 0
-    ? 'no data for previous period'
+    ? `not enough history before this period to compare (needs ${days * 2} days)`
     : excluded.length
-      ? `vs previous ${days === 1 ? '24 hours' : `${days} days`} · excl. ${excluded.map((p) => PLATFORM_LABEL[p]).join(', ')} (short history)`
+      ? `vs previous ${days === 1 ? '24 hours' : `${days} days`} · excl. ${excluded.length > 3 ? `${excluded.length} accounts` : excluded.map(nameOf).join(', ')} (short history)`
       : `vs previous ${days === 1 ? '24 hours' : `${days} days`}`;
 
   const cards: Card[] = [
@@ -78,7 +82,7 @@ export default function StatCards({ snapshot, filter, days }: Props) {
       label: 'Engagement rate',
       value: fmtPct(rateNow === null ? null : rateNow * 100, 2),
       delta: pctChange(rateCov, ratePrev),
-      note: `${deltaNote}. Avg engagement ÷ followers${filter === 'all' ? ' (weighted)' : ''}`,
+      note: `${deltaNote}. Avg engagement ÷ followers${filterAccountId(filter) ? '' : ' (weighted)'}`,
     },
     {
       label: 'Total followers',
@@ -102,7 +106,7 @@ export default function StatCards({ snapshot, filter, days }: Props) {
       delta: covered.length ? pctChange(curCov.length, prevCov.length) : null,
       note: deltaNote,
     },
-    mediaCard(current, platforms),
+    mediaCard(current, accounts.map((a) => a.platform), nameOf),
   ];
 
   return (
@@ -120,10 +124,14 @@ export default function StatCards({ snapshot, filter, days }: Props) {
 }
 
 /** Posts with an image or video vs posts without, by typical (median) engagement. */
-function mediaCard(current: Post[], platforms: Platform[]): Card {
+/** 1.7× or 277× (no decimal once it's big). */
+const times = (n: number) => `${n >= 10 ? Math.round(n) : n.toFixed(1)}×`;
+
+function mediaCard(current: Post[], platforms: Platform[], nameOf: (id: string) => string): Card {
   const label = 'Posts with images or video vs without';
   const cmp = mediaComparison(current);
-  const alwaysMedia = platforms.filter((pl) => !cmp?.platforms.includes(pl)).map((pl) => PLATFORM_LABEL[pl]);
+  const ALWAYS_MEDIA: Platform[] = ['instagram', 'tiktok', 'youtube'];
+  const alwaysMedia = ALWAYS_MEDIA.filter((pl) => platforms.includes(pl)).map((pl) => PLATFORM_LABEL[pl]);
   if (!cmp) {
     return {
       label,
@@ -132,21 +140,41 @@ function mediaCard(current: Post[], platforms: Platform[]): Card {
       note:
         current.length > 0 && current.every((p) => p.media !== null)
           ? 'Every post in this period has an image or video, so there’s nothing to compare.'
-          : `Not enough posts of both kinds in this period to compare (needs 3+ of each; ${current.filter((p) => p.media === null).length} without media).`,
+          : `Not enough posts of both kinds in this period to compare (needs 5+ of each per account; ${current.filter((p) => p.media === null).length} without media).`,
     };
   }
-  const { withMedia, without, ratio } = cmp;
-  const verdict = ratio >= 1 ? 'more' : 'less';
+  const { ratio, accounts } = cmp;
+  // Always phrase it as "N× more" for whichever kind does better.
+  const value =
+    ratio >= 1 ? `${times(ratio)} more engagement with media` : `${times(1 / ratio)} more engagement without media`;
+  const always = alwaysMedia.length ? ` ${alwaysMedia.join(', ')} posts always include media.` : '';
+  if (accounts.length === 1) {
+    const [a] = accounts;
+    return {
+      label,
+      value,
+      wide: true,
+      note:
+        `Typical post with an image or video: ${fmtNumber(Math.round(a.withMedia.typical))} engagement (${a.withMedia.count} posts). ` +
+        `Without: ${fmtNumber(Math.round(a.without.typical))} (${a.without.count} posts). Based on ${nameOf(a.accountId)}.${always}`,
+    };
+  }
+  // Several accounts: if they disagree, say how many favour media rather than average
+  // opposite results into one misleading number.
+  const mediaWins = accounts.filter((a) => a.ratio >= 1).length;
+  const agree = mediaWins === 0 || mediaWins === accounts.length;
+  const each = accounts
+    .map((a) =>
+      a.ratio >= 1
+        ? `${nameOf(a.accountId)} ${times(a.ratio)} more with media`
+        : `${nameOf(a.accountId)} ${times(1 / a.ratio)} more without`,
+    )
+    .join(', ');
   return {
     label,
-    value: `${ratio.toFixed(1)}× ${verdict} engagement`,
+    value: agree ? value : `Media wins on ${mediaWins} of ${accounts.length} accounts`,
     wide: true,
-    note:
-      `Typical post with an image or video: ${fmtNumber(Math.round(withMedia.typical))} engagement (${withMedia.count} posts). ` +
-      `Without: ${fmtNumber(Math.round(without.typical))} (${without.count} posts).` +
-      (cmp.platforms.length && alwaysMedia.length
-        ? ` Compares ${cmp.platforms.map((pl) => PLATFORM_LABEL[pl]).join(' and ')} only; ${alwaysMedia.join(', ')} posts always include media.`
-        : ''),
+    note: `Compared within each account${agree ? ', then averaged' : ''}: ${each}.${always}`,
   };
 }
 

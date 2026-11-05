@@ -1,17 +1,18 @@
-import { fmtDate, PLATFORM_LABEL, platformColor } from './format';
+import { accountLabel, fmtDate, platformColor } from './format';
 import { INSIGHT_DAYS, insightEnd, snapshotInsights } from './insights';
-import type { Platform, Snapshot } from './types';
+import type { Snapshot } from './types';
 
 interface Props {
   snapshot: Snapshot;
-  platform: Platform;
+  accountId: string;
 }
 
-export default function Highlights({ snapshot, platform }: Props) {
+export default function Highlights({ snapshot, accountId }: Props) {
   const generatedAt = new Date(snapshot.generatedAt);
   const end = insightEnd(generatedAt);
   const start = new Date(end.getTime() - INSIGHT_DAYS * 86_400_000);
-  const insights = snapshotInsights(snapshot, platform);
+  const insights = snapshotInsights(snapshot, accountId);
+  const label = accountLabel(snapshot, accountId);
 
   return (
     <section className="highlights" aria-labelledby="hl-title" aria-live="polite">
@@ -23,13 +24,13 @@ export default function Highlights({ snapshot, platform }: Props) {
         </p>
       </div>
       {insights.length === 0 ? (
-        <div className="card empty">Not enough {PLATFORM_LABEL[platform]} posts in this period for insights.</div>
+        <div className="card empty">Not enough {label} posts in this period for insights.</div>
       ) : (
         insights.map((insight) => (
           <article key={insight.id} className="card insight">
             <div className="insight-label">
               <span className="dot" style={{ background: platformColor(insight.platform) }} aria-hidden />
-              {PLATFORM_LABEL[insight.platform]} · {insight.title}
+              {label} · {insight.title}
             </div>
             <p>{insight.text}</p>
           </article>

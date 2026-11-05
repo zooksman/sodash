@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { RangeDays } from './App';
-import { fmtDate, fmtNumber, PLATFORM_LABEL, platformColor, rangeLabel } from './format';
+import { accountLabel, fmtDate, fmtNumber, PLATFORM_LABEL, platformColor, rangeLabel } from './format';
 import { engagement, postsInPeriod } from './metrics';
-import { PLATFORMS, type Platform, type Post, type PostMedia, type Snapshot } from './types';
+import type { Filter, Platform, Post, PostMedia, Snapshot } from './types';
 
 interface Props {
   snapshot: Snapshot;
   days: RangeDays;
-  platform: Platform;
-  onPlatform: (p: Platform) => void;
+  filter: Filter;
+  accountId: string;
+  onAccount: (id: string) => void;
 }
 
 const TOP_N = 5;
@@ -18,30 +19,37 @@ const RANK_BY_VIEWS: Platform[] = ['youtube', 'tiktok'];
 /** Height of the media area per platform when the media has no known aspect ratio. */
 const EMBED_HEIGHT: Partial<Record<Platform, number>> = { instagram: 460, facebook: 360 };
 
-export function topPosts(posts: Post[], platform: Platform, n = TOP_N): Post[] {
+/** One account's best posts: by views on YouTube and TikTok, by engagement elsewhere. */
+export function topPosts(posts: Post[], accountId: string, platform: Platform, n = TOP_N): Post[] {
   const score = (p: Post) => (RANK_BY_VIEWS.includes(platform) ? p.views : engagement(p)) ?? -1;
   return posts
-    .filter((p) => p.platform === platform)
+    .filter((p) => p.accountId === accountId)
     .sort((a, b) => score(b) - score(a))
     .slice(0, n);
 }
 
-export default function TopPosts({ snapshot, days, platform, onPlatform: setPlatform }: Props) {
-  const available = PLATFORMS.filter((p) => snapshot.sources[p].status === 'ok');
-  const tabRefs = useRef<Partial<Record<Platform, HTMLButtonElement | null>>>({});
+export default function TopPosts({ snapshot, days, filter, accountId, onAccount }: Props) {
+  // Tabs: every account in the selected group (or all accounts), one per platform.
+  const available = snapshot.accounts.filter(
+    (a) => snapshot.sources[a.id]?.status === 'ok' && (filter.group === 'all' || a.group === filter.group),
+  );
+  const manyGroups = new Set(available.map((a) => a.group)).size > 1;
+  const tabLabel = (id: string, platform: Platform) => (manyGroups ? accountLabel(snapshot, id) : PLATFORM_LABEL[platform]);
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const stripRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     stripRef.current?.scrollTo({ left: 0 });
-  }, [platform, days]);
+  }, [accountId, days]);
 
-  if (available.length === 0) return null;
+  const current = available.find((a) => a.id === accountId) ?? available[0];
+  if (!current) return null;
 
-  const index = Math.max(0, available.indexOf(platform));
+  const index = available.indexOf(current);
   const go = (step: number, focus = false) => {
     const next = available[(index + step + available.length) % available.length];
-    setPlatform(next);
-    if (focus) tabRefs.current[next]?.focus();
+    onAccount(next.id);
+    if (focus) tabRefs.current[next.id]?.focus();
   };
   const onTabKey = (e: KeyboardEvent) => {
     if (e.key === 'ArrowRight') go(1, true);
@@ -51,47 +59,47 @@ export default function TopPosts({ snapshot, days, platform, onPlatform: setPlat
   };
 
   const inRange = postsInPeriod(snapshot.posts, new Date(snapshot.generatedAt), days);
-  const top = topPosts(inRange, platform);
+  const top = topPosts(inRange, current.id, current.platform);
 
   return (
     <section className="card carousel" aria-labelledby="top-title">
       <div className="section-head">
         <h2 id="top-title">Top posts</h2>
         <p className="muted">
-          Top {TOP_N} per platform by {RANK_BY_VIEWS.includes(platform) ? 'views' : 'engagement'}, {rangeLabel(days)}.
+          Top {TOP_N} per account by {RANK_BY_VIEWS.includes(current.platform) ? 'views' : 'engagement'}, {rangeLabel(days)}.
         </p>
       </div>
 
       <div className="carousel-nav">
-        <button type="button" className="arrow" onClick={() => go(-1)} aria-label="Previous platform">‹</button>
-        <div className="tabs" role="tablist" aria-label="Platform">
-          {available.map((p) => (
+        <button type="button" className="arrow" onClick={() => go(-1)} aria-label="Previous account">‹</button>
+        <div className="tabs" role="tablist" aria-label="Account">
+          {available.map((a) => (
             <button
-              key={p}
-              ref={(el) => { tabRefs.current[p] = el; }}
+              key={a.id}
+              ref={(el) => { tabRefs.current[a.id] = el; }}
               type="button"
               role="tab"
-              id={`tab-${p}`}
-              aria-selected={p === platform}
+              id={`tab-${a.id}`}
+              aria-selected={a.id === current.id}
               aria-controls="top-panel"
-              tabIndex={p === platform ? 0 : -1}
+              tabIndex={a.id === current.id ? 0 : -1}
               className="tab"
-              onClick={() => setPlatform(p)}
+              onClick={() => onAccount(a.id)}
               onKeyDown={onTabKey}
             >
-              <span className="dot" style={{ background: platformColor(p) }} aria-hidden />
-              {PLATFORM_LABEL[p]}
+              <span className="dot" style={{ background: platformColor(a.platform) }} aria-hidden />
+              {tabLabel(a.id, a.platform)}
             </button>
           ))}
         </div>
-        <button type="button" className="arrow" onClick={() => go(1)} aria-label="Next platform">›</button>
+        <button type="button" className="arrow" onClick={() => go(1)} aria-label="Next account">›</button>
       </div>
 
-      <div id="top-panel" role="tabpanel" aria-labelledby={`tab-${platform}`}>
+      <div id="top-panel" role="tabpanel" aria-labelledby={`tab-${current.id}`}>
         {top.length === 0 ? (
-          <p className="empty">No {PLATFORM_LABEL[platform]} posts in this period.</p>
+          <p className="empty">No {accountLabel(snapshot, current.id)} posts in this period.</p>
         ) : (
-          <div key={`${platform}-${days}`} ref={stripRef} className="strip" tabIndex={0} aria-label="Posts, scroll sideways for more">
+          <div key={`${current.id}-${days}`} ref={stripRef} className="strip" tabIndex={0} aria-label="Posts, scroll sideways for more">
             {top.map((post, i) => (
               <PostCard key={post.id} post={post} rank={i + 1} />
             ))}
@@ -102,7 +110,8 @@ export default function TopPosts({ snapshot, days, platform, onPlatform: setPlat
   );
 }
 
-export function PostCard({ post, rank, showPlatform = false }: { post: Post; rank: number; showPlatform?: boolean }) {
+/** A post with its media. `label` (e.g. "OMG · Instagram") names the account when posts from several are mixed. */
+export function PostCard({ post, rank, label }: { post: Post; rank: number; label?: string }) {
   const metrics: [string, number | null][] = [
     ['views', post.views],
     ['likes', post.likes],
@@ -115,9 +124,9 @@ export function PostCard({ post, rank, showPlatform = false }: { post: Post; ran
       <div className="post-body">
         <div className="post-meta">
           <span className="post-rank">
-            {showPlatform && <span className="dot" style={{ background: platformColor(post.platform) }} aria-hidden />}
+            {label && <span className="dot" style={{ background: platformColor(post.platform) }} aria-hidden />}
             #{rank}
-            {showPlatform && ` on ${PLATFORM_LABEL[post.platform]}`}
+            {label && ` · ${label}`}
           </span>
           <time dateTime={post.publishedAt}>{fmtDate(post.publishedAt)}</time>
         </div>

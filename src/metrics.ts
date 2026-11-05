@@ -26,16 +26,16 @@ export function avgEngagement(posts: Post[]): number | null {
 }
 
 /**
- * Engagement rate = avg engagement per post / followers, per platform.
- * For several platforms, a follower-weighted average of the per-platform rates
- * (which equals sum(avg engagement) / sum(followers) over platforms with data).
+ * Engagement rate = avg engagement per post / followers, per account.
+ * For several accounts, a follower-weighted average of the per-account rates
+ * (which equals sum(avg engagement) / sum(followers) over accounts with data).
  */
 export function engagementRate(posts: Post[], accounts: AccountSummary[]): number | null {
   let weighted = 0;
   let totalFollowers = 0;
   for (const account of accounts) {
     if (!account.followers) continue;
-    const avg = avgEngagement(posts.filter((p) => p.platform === account.platform));
+    const avg = avgEngagement(posts.filter((p) => p.accountId === account.id));
     if (avg === null) continue;
     weighted += (avg / account.followers) * account.followers;
     totalFollowers += account.followers;
@@ -136,7 +136,7 @@ export function dailySeries(posts: Post[], end: Date, days: number): DayPoint[] 
 // ---------------------------------------------------------------------------
 // Posts with media (image or video attached) vs without
 // ---------------------------------------------------------------------------
-const MIN_PER_GROUP = 3;
+const MIN_PER_GROUP = 5;
 
 function median(values: number[]): number {
   const s = [...values].sort((a, b) => a - b);
@@ -144,35 +144,44 @@ function median(values: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-export interface MediaComparison {
+export interface AccountMediaComparison {
+  accountId: string;
   withMedia: { typical: number; count: number };
   without: { typical: number; count: number };
   ratio: number; // typical with / typical without
-  platforms: Platform[]; // platforms that had both kinds of post
+}
+
+export interface MediaComparison {
+  /** Per-account ratios averaged (geometric mean), so 2× better and 2× worse cancel out. */
+  ratio: number;
+  accounts: AccountMediaComparison[];
 }
 
 /**
  * Compares typical (median) engagement of posts with an attached image or video against
- * posts without one. Only platforms that have at least MIN_PER_GROUP of each kind count,
- * since Instagram, TikTok and YouTube posts always carry media.
+ * posts without one, within each account that has at least MIN_PER_GROUP of each kind
+ * (Instagram, TikTok and YouTube posts always carry media). Accounts are compared one at a
+ * time, never pooled: pooling would compare one account's photos with another's text posts.
  */
 export function mediaComparison(posts: Post[]): MediaComparison | null {
   const scored = posts.filter((p) => engagement(p) !== null);
-  const platforms = [...new Set(scored.map((p) => p.platform))].filter((pl) => {
-    const own = scored.filter((p) => p.platform === pl);
-    const withCount = own.filter((p) => p.media !== null).length;
-    return withCount >= MIN_PER_GROUP && own.length - withCount >= MIN_PER_GROUP;
-  });
-  if (platforms.length === 0) return null;
-  const pool = scored.filter((p) => platforms.includes(p.platform));
-  const withMedia = pool.filter((p) => p.media !== null).map((p) => engagement(p)!);
-  const without = pool.filter((p) => p.media === null).map((p) => engagement(p)!);
-  const typicalWithout = median(without);
-  if (typicalWithout === 0) return null;
-  return {
-    withMedia: { typical: median(withMedia), count: withMedia.length },
-    without: { typical: typicalWithout, count: without.length },
-    ratio: median(withMedia) / typicalWithout,
-    platforms,
-  };
+  const accounts: AccountMediaComparison[] = [];
+  for (const accountId of new Set(scored.map((p) => p.accountId))) {
+    const own = scored.filter((p) => p.accountId === accountId);
+    const withMedia = own.filter((p) => p.media !== null).map((p) => engagement(p)!);
+    const without = own.filter((p) => p.media === null).map((p) => engagement(p)!);
+    if (withMedia.length < MIN_PER_GROUP || without.length < MIN_PER_GROUP) continue;
+    const typicalWith = median(withMedia);
+    const typicalWithout = median(without);
+    if (typicalWith === 0 || typicalWithout === 0) continue;
+    accounts.push({
+      accountId,
+      withMedia: { typical: typicalWith, count: withMedia.length },
+      without: { typical: typicalWithout, count: without.length },
+      ratio: typicalWith / typicalWithout,
+    });
+  }
+  if (accounts.length === 0) return null;
+  const ratio = Math.exp(accounts.reduce((sum, a) => sum + Math.log(a.ratio), 0) / accounts.length);
+  return { ratio, accounts };
 }

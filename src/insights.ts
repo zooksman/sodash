@@ -11,6 +11,7 @@ import type { Platform, Post, Snapshot } from './types';
 
 export interface Insight {
   id: string;
+  accountId: string; // filled in by accountInsights()
   platform: Platform;
   title: string;
   text: string;
@@ -87,15 +88,15 @@ export function postingVolumeInsight(posts: Post[], platform: Platform): Insight
 
   return {
     id: `${platform}-volume`,
+    accountId: '',
     platform,
     title: 'Posts per day vs engagement',
     text: `On days with ${heavyLabel}, ${postPart}, and ${dayPart}. ${verdict}`,
   };
 }
 
-/** 30-day growth: engagement per post and post count vs the previous 30 days. */
-export function growthInsight(allPosts: Post[], platform: Platform, end: Date): Insight | null {
-  const own = allPosts.filter((p) => p.platform === platform);
+/** 30-day growth: engagement per post and post count vs the previous 30 days. `own` is all of one account's posts. */
+export function growthInsight(own: Post[], platform: Platform, end: Date): Insight | null {
   const oldest = Math.min(...own.map((p) => Date.parse(p.publishedAt)));
   // Same coverage rule as the stat cards: history must reach ≥90% into the previous period.
   if (oldest > end.getTime() - 2 * INSIGHT_DAYS * DAY_MS + 0.1 * INSIGHT_DAYS * DAY_MS) return null;
@@ -112,6 +113,7 @@ export function growthInsight(allPosts: Post[], platform: Platform, end: Date): 
   const direction = change >= 0 ? 'up' : 'down';
   return {
     id: `${platform}-growth`,
+    accountId: '',
     platform,
     title: '30-day growth',
     text:
@@ -132,6 +134,7 @@ export function underperformerInsight(posts: Post[], platform: Platform): Insigh
   const share = Math.round((weak.length / scored.length) * 100);
   return {
     id: `${platform}-weak`,
+    accountId: '',
     platform,
     title: 'Below-average posts',
     text:
@@ -173,6 +176,7 @@ export function bestTimeInsight(posts: Post[], platform: Platform, timeZone: str
     .find((part) => part.type === 'timeZoneName')?.value;
   return {
     id: `${platform}-time`,
+    accountId: '',
     platform,
     title: 'Best time to post',
     text:
@@ -192,6 +196,7 @@ export function shareRateInsight(posts: Post[], platform: Platform): Insight | n
   const top = both.reduce((a, b) => (b.shares! > a.shares! ? b : a));
   return {
     id: `${platform}-shares`,
+    accountId: '',
     platform,
     title: 'How often posts get shared',
     text:
@@ -213,6 +218,7 @@ export function videoVsPhotoInsight(posts: Post[], platform: Platform): Insight 
   const winner = v >= ph ? 'Videos' : 'Photos and carousels';
   return {
     id: `${platform}-format`,
+    accountId: '',
     platform,
     title: 'Videos vs photos',
     text:
@@ -230,6 +236,7 @@ export function reachInsight(posts: Post[], platform: Platform, followers: numbe
   const beyond = viewed.filter((p) => p.views! > followers).length;
   return {
     id: `${platform}-reach`,
+    accountId: '',
     platform,
     title: 'Reach beyond followers',
     text:
@@ -248,6 +255,7 @@ export function likeRateInsight(posts: Post[], platform: Platform): Insight | nu
   const best = rated.reduce((a, b) => (rate(b) > rate(a) ? b : a));
   return {
     id: `${platform}-likerate`,
+    accountId: '',
     platform,
     title: 'Like rate',
     text:
@@ -278,30 +286,37 @@ function platformSpecificInsight(recent: Post[], platform: Platform, ctx: Insigh
   }
 }
 
-/** Up to three insights for a platform: the two general ones by priority, then its own. */
-export function platformInsights(
+/**
+ * Up to three insights for one account: the two general ones by priority, then the one
+ * specific to its platform. `allPosts` may hold every account; only this one's are used.
+ */
+export function accountInsights(
   allPosts: Post[],
+  accountId: string,
   platform: Platform,
   generatedAt: Date,
   ctx: InsightContext,
 ): Insight[] {
   const end = insightEnd(generatedAt);
-  const recent = postsInPeriod(allPosts, end, INSIGHT_DAYS).filter((p) => p.platform === platform);
+  const own = allPosts.filter((p) => p.accountId === accountId);
+  const recent = postsInPeriod(own, end, INSIGHT_DAYS);
   const general = [
     postingVolumeInsight(recent, platform),
-    growthInsight(allPosts, platform, end),
+    growthInsight(own, platform, end),
     underperformerInsight(recent, platform),
   ]
     .filter((i): i is Insight => i !== null)
     .slice(0, 2);
-  const own = platformSpecificInsight(recent, platform, ctx);
-  return own ? [...general, own] : general;
+  const specific = platformSpecificInsight(recent, platform, ctx);
+  return (specific ? [...general, specific] : general).map((i) => ({ ...i, accountId, id: `${accountId}-${i.id}` }));
 }
 
-/** Insights for a platform straight from the snapshot, in the viewer's time zone. */
-export function snapshotInsights(snapshot: Snapshot, platform: Platform): Insight[] {
-  return platformInsights(snapshot.posts, platform, new Date(snapshot.generatedAt), {
-    followers: snapshot.accounts.find((a) => a.platform === platform)?.followers ?? null,
+/** Insights for an account straight from the snapshot, in the viewer's time zone. */
+export function snapshotInsights(snapshot: Snapshot, accountId: string): Insight[] {
+  const account = snapshot.accounts.find((a) => a.id === accountId);
+  if (!account) return [];
+  return accountInsights(snapshot.posts, accountId, account.platform, new Date(snapshot.generatedAt), {
+    followers: account.followers,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   });
 }
