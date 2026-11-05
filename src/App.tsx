@@ -3,6 +3,7 @@ import Header from './Header';
 import PerformanceChart from './PerformanceChart';
 import StatCards from './StatCards';
 import Highlights from './Highlights';
+import Spotlight from './Spotlight';
 import TopPosts from './TopPosts';
 import { PLATFORMS } from './types';
 import { PLATFORM_LABEL } from './format';
@@ -64,8 +65,14 @@ export default function App() {
           </section>
         ) : (
           <>
-            <StatCards snapshot={snapshot} filter={filter} days={days} />
-            <PerformanceChart snapshot={snapshot} filter={filter} days={days} />
+            {/* Stats and chart take two of three columns; Spotlight runs down the third. */}
+            <div className="overview">
+              <div className="overview-main">
+                <StatCards snapshot={snapshot} filter={filter} days={days} />
+                <PerformanceChart snapshot={snapshot} filter={filter} days={days} />
+              </div>
+              <Spotlight snapshot={snapshot} filter={filter} days={days} />
+            </div>
             {/* Top posts takes two of three columns; Highlights fills the third. */}
             <div className="split">
               <TopPosts snapshot={snapshot} days={days} platform={focusPlatform} onPlatform={setFocusPlatform} />

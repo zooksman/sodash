@@ -1,5 +1,5 @@
 import { fmtDate, PLATFORM_LABEL, platformColor } from './format';
-import { INSIGHT_DAYS, insightEnd, platformInsights } from './insights';
+import { INSIGHT_DAYS, insightEnd, snapshotInsights } from './insights';
 import type { Platform, Snapshot } from './types';
 
 interface Props {
@@ -11,7 +11,7 @@ export default function Highlights({ snapshot, platform }: Props) {
   const generatedAt = new Date(snapshot.generatedAt);
   const end = insightEnd(generatedAt);
   const start = new Date(end.getTime() - INSIGHT_DAYS * 86_400_000);
-  const insights = platformInsights(snapshot.posts, platform, generatedAt);
+  const insights = snapshotInsights(snapshot, platform);
 
   return (
     <section className="highlights" aria-labelledby="hl-title" aria-live="polite">

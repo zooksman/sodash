@@ -102,7 +102,7 @@ export default function TopPosts({ snapshot, days, platform, onPlatform: setPlat
   );
 }
 
-function PostCard({ post, rank }: { post: Post; rank: number }) {
+export function PostCard({ post, rank, showPlatform = false }: { post: Post; rank: number; showPlatform?: boolean }) {
   const metrics: [string, number | null][] = [
     ['views', post.views],
     ['likes', post.likes],
@@ -114,7 +114,11 @@ function PostCard({ post, rank }: { post: Post; rank: number }) {
       {post.media && <Media media={post.media} platform={post.platform} title={`Media for post #${rank}`} />}
       <div className="post-body">
         <div className="post-meta">
-          <span>#{rank}</span>
+          <span className="post-rank">
+            {showPlatform && <span className="dot" style={{ background: platformColor(post.platform) }} aria-hidden />}
+            #{rank}
+            {showPlatform && ` on ${PLATFORM_LABEL[post.platform]}`}
+          </span>
           <time dateTime={post.publishedAt}>{fmtDate(post.publishedAt)}</time>
         </div>
         <p className="post-text">{post.text || <span className="muted">(no text)</span>}</p>
@@ -136,7 +140,7 @@ function PostCard({ post, rank }: { post: Post; rank: number }) {
   );
 }
 
-function Media({ media, platform, title }: { media: PostMedia; platform: Platform; title: string }) {
+export function Media({ media, platform, title }: { media: PostMedia; platform: Platform; title: string }) {
   const [measured, setMeasured] = useState<number | null>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
 

@@ -7,7 +7,7 @@
  */
 import { fmtNumber } from './format';
 import { engagement, postsInPeriod } from './metrics';
-import type { Platform, Post } from './types';
+import type { Platform, Post, Snapshot } from './types';
 
 export interface Insight {
   id: string;
@@ -141,15 +141,167 @@ export function underperformerInsight(posts: Post[], platform: Platform): Insigh
   };
 }
 
-/** The two insights shown for a platform, in priority order. */
-export function platformInsights(allPosts: Post[], platform: Platform, generatedAt: Date): Insight[] {
+// ---------------------------------------------------------------------------
+// Platform-specific insights: one per platform, built around what that platform's
+// public data is best at.
+// ---------------------------------------------------------------------------
+
+/** X: best 4-hour block of the day to post, in the viewer's time zone. */
+export function bestTimeInsight(posts: Post[], platform: Platform, timeZone: string): Insight | null {
+  const scored = withEngagement(posts);
+  if (scored.length < MIN_POSTS) return null;
+  const hourOf = new Intl.DateTimeFormat('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone });
+  const blocks = new Map<number, Post[]>();
+  for (const p of scored) {
+    const block = Math.floor(Number(hourOf.format(new Date(p.publishedAt))) / 4);
+    blocks.set(block, [...(blocks.get(block) ?? []), p]);
+  }
+  const ranked = [...blocks.entries()]
+    .filter(([, list]) => list.length >= 5)
+    .map(([block, list]) => ({ block, typical: medianEngagement(list), count: list.length }))
+    .sort((a, b) => b.typical - a.typical);
+  if (ranked.length < 3) return null;
+  const label = (block: number) => {
+    const fmt = (h: number) => `${h % 12 || 12}${h < 12 || h === 24 ? 'am' : 'pm'}`;
+    return `${fmt(block * 4)}–${fmt(block * 4 + 4)}`;
+  };
+  const best = ranked[0];
+  const worst = ranked[ranked.length - 1];
+  const overall = medianEngagement(scored);
+  const zone = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'short' })
+    .formatToParts(new Date())
+    .find((part) => part.type === 'timeZoneName')?.value;
+  return {
+    id: `${platform}-time`,
+    platform,
+    title: 'Best time to post',
+    text:
+      `Posts published ${label(best.block)}${zone ? ` ${zone}` : ''} got a typical ${n(best.typical)} engagement, ` +
+      `${(best.typical / overall).toFixed(1)}× the account’s typical ${n(overall)} (${best.count} posts). ` +
+      `Weakest window: ${label(worst.block)} (${n(worst.typical)}).`,
+  };
+}
+
+/** Facebook: how often posts get passed on: shares per 100 likes, and the most-shared post. */
+export function shareRateInsight(posts: Post[], platform: Platform): Insight | null {
+  const both = posts.filter((p) => p.likes !== null && p.shares !== null);
+  if (both.length < MIN_POSTS) return null;
+  const likes = both.reduce((s, p) => s + p.likes!, 0);
+  const shares = both.reduce((s, p) => s + p.shares!, 0);
+  if (likes === 0) return null;
+  const top = both.reduce((a, b) => (b.shares! > a.shares! ? b : a));
+  return {
+    id: `${platform}-shares`,
+    platform,
+    title: 'How often posts get shared',
+    text:
+      `For every 100 likes, posts earned ${Math.round((shares / likes) * 100)} shares. ` +
+      `Most shared: “${truncate(top.text || 'untitled post')}” (${n(top.shares!)} shares, ${shortDate(top.publishedAt)}).`,
+  };
+}
+
+/** Instagram: videos (posts with a play count) vs photos and carousels. */
+export function videoVsPhotoInsight(posts: Post[], platform: Platform): Insight | null {
+  const scored = withEngagement(posts);
+  const videos = scored.filter((p) => p.views !== null);
+  const photos = scored.filter((p) => p.views === null);
+  if (videos.length < 3 || photos.length < 3) return null;
+  const v = medianEngagement(videos);
+  const ph = medianEngagement(photos);
+  if (v === 0 || ph === 0) return null;
+  const ratio = v >= ph ? v / ph : ph / v;
+  const winner = v >= ph ? 'Videos' : 'Photos and carousels';
+  return {
+    id: `${platform}-format`,
+    platform,
+    title: 'Videos vs photos',
+    text:
+      `${winner} perform better: a typical video got ${n(v)} engagement vs ${n(ph)} for photos and carousels ` +
+      `(${ratio.toFixed(1)}×), across ${videos.length} videos and ${photos.length} photos.`,
+  };
+}
+
+/** TikTok: typical views compared with the follower count. */
+export function reachInsight(posts: Post[], platform: Platform, followers: number | null): Insight | null {
+  const viewed = posts.filter((p) => p.views !== null);
+  if (viewed.length < MIN_POSTS || !followers) return null;
+  const typical = median(viewed.map((p) => p.views!));
+  const ratio = typical / followers;
+  const beyond = viewed.filter((p) => p.views! > followers).length;
+  return {
+    id: `${platform}-reach`,
+    platform,
+    title: 'Reach beyond followers',
+    text:
+      `A typical video gets ${n(typical)} views, ${ratio.toFixed(1)}× the account’s ${n(followers)} followers, ` +
+      `and ${beyond} of ${viewed.length} videos were seen by more people than follow the account` +
+      (ratio > 1 ? ', so most views come from TikTok’s For You feed.' : '.'),
+  };
+}
+
+/** YouTube: share of viewers who like a video, and the best-liked video. */
+export function likeRateInsight(posts: Post[], platform: Platform): Insight | null {
+  const rated = posts.filter((p) => p.likes !== null && p.views !== null && p.views > 0);
+  if (rated.length < MIN_POSTS) return null;
+  const rate = (p: Post) => p.likes! / p.views!;
+  const typical = median(rated.map(rate));
+  const best = rated.reduce((a, b) => (rate(b) > rate(a) ? b : a));
+  return {
+    id: `${platform}-likerate`,
+    platform,
+    title: 'Like rate',
+    text:
+      `${(typical * 100).toFixed(1)}% of viewers like a typical video. ` +
+      `Best-liked: “${truncate(best.text || 'untitled video')}” at ${(rate(best) * 100).toFixed(1)}% ` +
+      `(${n(best.views!)} views).`,
+  };
+}
+
+/** Context the platform-specific rules need beyond the posts themselves. */
+export interface InsightContext {
+  followers: number | null;
+  timeZone: string;
+}
+
+function platformSpecificInsight(recent: Post[], platform: Platform, ctx: InsightContext): Insight | null {
+  switch (platform) {
+    case 'x':
+      return bestTimeInsight(recent, platform, ctx.timeZone);
+    case 'facebook':
+      return shareRateInsight(recent, platform);
+    case 'instagram':
+      return videoVsPhotoInsight(recent, platform);
+    case 'tiktok':
+      return reachInsight(recent, platform, ctx.followers);
+    case 'youtube':
+      return likeRateInsight(recent, platform);
+  }
+}
+
+/** Up to three insights for a platform: the two general ones by priority, then its own. */
+export function platformInsights(
+  allPosts: Post[],
+  platform: Platform,
+  generatedAt: Date,
+  ctx: InsightContext,
+): Insight[] {
   const end = insightEnd(generatedAt);
   const recent = postsInPeriod(allPosts, end, INSIGHT_DAYS).filter((p) => p.platform === platform);
-  return [
+  const general = [
     postingVolumeInsight(recent, platform),
     growthInsight(allPosts, platform, end),
     underperformerInsight(recent, platform),
   ]
     .filter((i): i is Insight => i !== null)
     .slice(0, 2);
+  const own = platformSpecificInsight(recent, platform, ctx);
+  return own ? [...general, own] : general;
+}
+
+/** Insights for a platform straight from the snapshot, in the viewer's time zone. */
+export function snapshotInsights(snapshot: Snapshot, platform: Platform): Insight[] {
+  return platformInsights(snapshot.posts, platform, new Date(snapshot.generatedAt), {
+    followers: snapshot.accounts.find((a) => a.platform === platform)?.followers ?? null,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
 }
