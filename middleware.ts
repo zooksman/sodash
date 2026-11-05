@@ -4,7 +4,7 @@
  * BASIC_AUTH_USER / BASIC_AUTH_PASSWORD environment variables.
  */
 import { next } from '@vercel/functions';
-import { AUTH_CHALLENGE, isAuthorized } from './basic-auth';
+import { AUTH_CHALLENGE, isAuthorized } from './basic-auth.js'; // .js: Vercel runs this as Node ESM, which needs the extension
 
 export default function middleware(request: Request) {
   const user = process.env.BASIC_AUTH_USER;

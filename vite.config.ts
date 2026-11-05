@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { AUTH_CHALLENGE, isAuthorized } from './basic-auth';
+import { AUTH_CHALLENGE, isAuthorized } from './basic-auth.js';
 
 /** Same login as production, for `npm run dev` and `npm run preview`. Reads .env. */
 function basicAuth(user: string, password: string): Plugin {
